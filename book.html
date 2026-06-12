@@ -12,6 +12,7 @@
   }
   *{margin:0;padding:0;box-sizing:border-box;}
   html,body{height:100%;}
+  @supports (height:100dvh){ html,body{height:100dvh;} }
   body{
     display:flex;flex-direction:column;
     background:radial-gradient(120% 100% at 50% 20%, #FFFFFF 0%, #F5F2EF 55%, #EAE5DF 100%);
@@ -164,9 +165,20 @@
   @media (prefers-reduced-motion: reduce){
     .sheet{transition:transform .2s linear;}
   }
-  @media (max-width:560px){
-    .arrow{width:36px;height:36px;font-size:15px;}
-    header{padding-top:14px;}
+  @media (max-width:720px), (orientation:portrait){
+    .arrow{
+      width:34px;height:34px;font-size:14px;
+      background:#ffffffb3;
+    }
+    .arrow.left{left:6px;}
+    .arrow.right{right:6px;}
+    header{padding:12px 12px 4px;}
+    header h1{letter-spacing:.1em;}
+    main{padding:8px 0;}
+    footer{gap:10px;padding:8px 12px 14px;flex-wrap:wrap;}
+    footer .credit{position:static;width:100%;text-align:center;}
+    body > svg.bg-ring{width:70vw;right:-30%;}
+    body > svg.bg-ring2{display:none;}
   }
 </style>
 </head>
@@ -238,91 +250,156 @@
   const counter = document.getElementById('counter');
   const prevBtn = document.getElementById('prevBtn');
   const nextBtn = document.getElementById('nextBtn');
+  const fsBtn = document.getElementById('fsBtn');
   const sheets = [...book.querySelectorAll('.sheet')];
-  const N = sheets.length;
-  let current = 0;
+  const N = sheets.length;        // sheets
+  const P = N * 2;                // pages
+  let mode = null;                // 'spread' | 'single'
+  let cur = 0;                    // spread: flipped sheets 0..N | single: page index 0..P-1
   let busy = false;
 
-  // size: as big as fits — spread is 2:1 (two square pages)
+  const isSingle = () => window.innerWidth < 720 || window.innerHeight > window.innerWidth;
+
+  function setZAll(){
+    sheets.forEach((s,i)=>{
+      s.style.zIndex = s.classList.contains('flipped') ? i + 1 : N - i;
+    });
+  }
+  function applyFlips(F){
+    sheets.forEach((s,i)=> s.classList.toggle('flipped', i < F));
+    setZAll();
+  }
+
   function size(){
-    const availW = main.clientWidth - 130;   // room for arrows
+    const single = isSingle();
+    const newMode = single ? 'single' : 'spread';
+    if(newMode !== mode){
+      if(mode !== null){
+        // carry reading position across mode switch
+        cur = (newMode === 'single')
+          ? Math.max(0, Math.min(cur * 2, P - 1))
+          : Math.min(Math.ceil(cur / 2), N);
+      }
+      mode = newMode;
+      applyFlips(mode === 'single' ? Math.ceil(cur / 2) : cur);
+    }
+    const reserve = single ? 10 : 130;
+    const availW = main.clientWidth - reserve;
     const availH = main.clientHeight - 10;
-    const pw = Math.min(availW / 2, availH); // square page
+    const pw = single ? Math.min(availW, availH) : Math.min(availW / 2, availH);
     book.style.width = (pw * 2) + 'px';
     book.style.height = pw + 'px';
     position();
   }
   window.addEventListener('resize', size);
+  window.addEventListener('orientationchange', ()=> setTimeout(size, 120));
 
-  function setZ(){
-    sheets.forEach((s,i)=>{
-      s.style.zIndex = s.classList.contains('flipped') ? i + 1 : N - i;
-    });
-  }
   function position(){
     const pw = book.clientWidth / 2;
     let x = 0;
-    if(current === 0) x = -pw/2;
-    else if(current === N) x = pw/2;
+    if(mode === 'single'){
+      // even index = right page, odd = left page; center the focused page
+      x = (cur % 2 === 0) ? -pw / 2 : pw / 2;
+      book.classList.toggle('opened', Math.ceil(cur / 2) > 0);
+      book.classList.toggle('finished', cur === P - 1);
+      counter.textContent = `Хуудас ${cur + 1} / ${P}`;
+      prevBtn.disabled = cur === 0;
+      nextBtn.disabled = cur === P - 1;
+    } else {
+      if(cur === 0) x = -pw / 2;
+      else if(cur === N) x = pw / 2;
+      book.classList.toggle('opened', cur > 0);
+      book.classList.toggle('finished', cur === N);
+      counter.textContent = cur === 0 ? 'Нүүр' : (cur === N ? 'Ар нүүр' : `Хуудас ${cur*2} / ${P}`);
+      prevBtn.disabled = cur === 0;
+      nextBtn.disabled = cur === N;
+    }
     wrap.style.transform = `translateX(${x}px)`;
-    book.classList.toggle('opened', current > 0);
-    book.classList.toggle('finished', current === N);
-    counter.textContent = current === 0 ? 'Нүүр' : (current === N ? 'Ар нүүр' : `Хуудас ${current*2} / ${N*2}`);
-    prevBtn.disabled = current === 0;
-    nextBtn.disabled = current === N;
   }
-  function lock(){ busy = true; setTimeout(()=> busy = false, 650); }
+  function lock(){ busy = true; setTimeout(()=> busy = false, 620); }
+
   function next(){
-    if(busy || current >= N) return;
-    const s = sheets[current];
-    s.classList.add('flipped');
-    setTimeout(()=> s.style.zIndex = current, 560);
-    current++;
+    if(busy) return;
+    if(mode === 'single'){
+      if(cur >= P - 1) return;
+      cur++;
+      const F = Math.ceil(cur / 2);
+      const s = sheets[F - 1];
+      if(s && !s.classList.contains('flipped')){
+        s.classList.add('flipped');
+        setTimeout(()=> s.style.zIndex = F, 560);
+      }
+    } else {
+      if(cur >= N) return;
+      const s = sheets[cur];
+      s.classList.add('flipped');
+      const z = cur + 1;
+      setTimeout(()=> s.style.zIndex = z, 560);
+      cur++;
+    }
     position(); lock();
   }
   function prev(){
-    if(busy || current <= 0) return;
-    current--;
-    const s = sheets[current];
-    s.classList.remove('flipped');
-    setTimeout(setZ, 560);
+    if(busy) return;
+    if(mode === 'single'){
+      if(cur <= 0) return;
+      cur--;
+      const F = Math.ceil(cur / 2);
+      const s = sheets[F];
+      if(s && s.classList.contains('flipped')){
+        s.classList.remove('flipped');
+        setTimeout(setZAll, 560);
+      }
+    } else {
+      if(cur <= 0) return;
+      cur--;
+      sheets[cur].classList.remove('flipped');
+      setTimeout(setZAll, 560);
+    }
     position(); lock();
   }
 
   prevBtn.addEventListener('click', prev);
   nextBtn.addEventListener('click', next);
 
-  // click left half of the book = back, right half = forward (like a real book)
+  // tap left half = back, right half = forward
   book.addEventListener('click', e=>{
     const r = book.getBoundingClientRect();
-    (e.clientX - r.left < r.width / 2) ? prev() : next();
+    // in single mode use the visible viewport, not the (half-offscreen) book
+    const ref = (mode === 'single') ? {left:0, width:window.innerWidth} : {left:r.left, width:r.width};
+    (e.clientX - ref.left < ref.width / 2) ? prev() : next();
   });
 
-  // keyboard
   document.addEventListener('keydown', e=>{
     if(e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); next(); }
     if(e.key === 'ArrowLeft') { e.preventDefault(); prev(); }
   });
 
-  // swipe
-  let tx = null;
-  document.addEventListener('touchstart', e=>{ tx = e.touches[0].clientX; }, {passive:true});
+  let tx = null, ty = null;
+  document.addEventListener('touchstart', e=>{ tx = e.touches[0].clientX; ty = e.touches[0].clientY; }, {passive:true});
   document.addEventListener('touchend', e=>{
     if(tx === null) return;
     const dx = e.changedTouches[0].clientX - tx;
-    if(Math.abs(dx) > 40) (dx < 0 ? next() : prev());
-    tx = null;
+    const dy = e.changedTouches[0].clientY - ty;
+    if(Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) (dx < 0 ? next() : prev());
+    tx = ty = null;
   }, {passive:true});
 
-  // fullscreen
-  document.getElementById('fsBtn').addEventListener('click', ()=>{
-    const el = document.documentElement;
-    if(!document.fullscreenElement){ (el.requestFullscreen||el.webkitRequestFullscreen||function(){}).call(el); }
-    else document.exitFullscreen();
+  // fullscreen (hidden on devices that don't support it, e.g. iPhone Safari)
+  const fsRoot = document.documentElement;
+  if(!fsRoot.requestFullscreen && !fsRoot.webkitRequestFullscreen){
+    fsBtn.style.display = 'none';
+  }
+  fsBtn.addEventListener('click', ()=>{
+    if(!document.fullscreenElement && !document.webkitFullscreenElement){
+      (fsRoot.requestFullscreen || fsRoot.webkitRequestFullscreen).call(fsRoot);
+    } else {
+      (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    }
   });
   document.addEventListener('fullscreenchange', ()=> setTimeout(size, 80));
+  document.addEventListener('webkitfullscreenchange', ()=> setTimeout(size, 80));
 
-  setZ();
   size();
 </script>
 </body>
